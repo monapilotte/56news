@@ -382,11 +382,10 @@ def send_to_discord(keyword: str, article: dict) -> bool:
     source = article.get("source", "")
     title = article["title"]
     # 알림(푸시) 첫 줄에 바로 보이도록 본문에 [키워드] 제목 · 언론사 를 넣는다
-    content = f"📰 **[{keyword}]** {title}"
+    content = f"📰 {title}"
     if source:
         content += f" · {source}"
 
-    footer = f"{source} · 키워드: {keyword}" if source else f"키워드: {keyword}"
     desc = article["description"]
     if desc and desc[:20] in title:
         desc = ""
@@ -395,9 +394,10 @@ def send_to_discord(keyword: str, article: dict) -> bool:
         "url": article["link"],
         "description": desc[:300],
         "color": 0x03C75A,
-        "footer": {"text": footer[:2048]},
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+    if source:
+        embed["footer"] = {"text": source[:2048]}
     payload = {
         "content": content[:2000],
         "embeds": [embed],
