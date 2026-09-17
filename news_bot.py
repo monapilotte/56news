@@ -55,8 +55,8 @@ KEYWORDS = [k.strip() for k in os.getenv("KEYWORDS", "").split(",") if k.strip()
 # 검사 주기(초). 기본 300초 = 5분
 CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", "300"))
 
-# 검색어당 한 번에 확인할 최대 기사 수
-DISPLAY = int(os.getenv("DISPLAY", "20"))
+# 검색어당 한 번에 확인할 최대 기사 수 (경기날 도배 대비 넉넉히. 네이버 최대 100)
+DISPLAY = int(os.getenv("DISPLAY", "50"))
 
 # 하루 API 호출 상한 (네이버 무료 한도 25,000 훨씬 아래로 안전망). 0이면 무제한.
 DAILY_CALL_CAP = int(os.getenv("DAILY_CALL_CAP", "10000"))
