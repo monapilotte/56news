@@ -133,13 +133,18 @@ def load_targets() -> list:
                     "label": (item.get("label") or queries[0]).strip(),
                     "include_any": [w.lower() for w in item.get("include_any", [])],
                     "exclude_any": [w.lower() for w in item.get("exclude_any", [])],
+                    # 제목에 이 단어가 있으면 통과 (언급만 된 잡기사 거르기)
+                    "title_any": [w.lower() for w in item.get("title_any", [])],
+                    # 제목엔 없어도 요약에 이름+이 동작단어가 있으면 통과 (경기내용 기사 살리기)
+                    "body_any": [w.lower() for w in item.get("body_any", [])],
                 }
             )
         return targets
 
     # .env 의 단순 키워드
     return [
-        {"queries": [k], "label": k, "include_any": [], "exclude_any": []}
+        {"queries": [k], "label": k, "include_any": [], "exclude_any": [],
+         "title_any": [], "body_any": []}
         for k in KEYWORDS
     ]
 
@@ -275,12 +280,35 @@ def fetch_merged(queries: list, label: str) -> list:
     return list(merged.values())
 
 
-def passes_filter(article: dict, include_any: list, exclude_any: list) -> bool:
-    """제목+요약 기준으로 include/exclude 필터를 통과하는지 검사"""
-    text = (article["title"] + " " + article["description"]).lower()
+def passes_filter(article: dict, include_any: list, exclude_any: list,
+                  title_any: list = None, body_any: list = None) -> bool:
+    """관련성 필터.
+
+    - exclude_any: 하나라도 있으면 버림 (농구·배우 등)
+    - include_any: 있으면 그 중 하나는 제목/요약에 있어야 함
+    - 관련성(주인공 여부):
+        title_any 가 지정되면 →
+          제목에 title_any 단어가 있으면 통과,
+          없으면 body_any 가 지정된 경우에 한해
+          "요약에 title_any 이름 + 투구동작(body_any)"이 같이 있으면 통과.
+        (언급만 된 잡기사는 버리고, 경기내용 기사는 살림)
+    """
+    title = article["title"].lower()
+    desc = article["description"].lower()
+    text = title + " " + desc
+
     if exclude_any and any(word in text for word in exclude_any):
         return False
     if include_any and not any(word in text for word in include_any):
+        return False
+
+    if title_any:
+        if any(word in title for word in title_any):
+            return True
+        if body_any:
+            name_in_desc = any(word in desc for word in title_any)
+            action_in_desc = any(word in desc for word in body_any)
+            return name_in_desc and action_in_desc
         return False
     return True
 
@@ -433,7 +461,13 @@ def check_once(targets: list, state: dict, first_run_labels: set) -> None:
         articles = [
             a
             for a in fetched
-            if passes_filter(a, target["include_any"], target["exclude_any"])
+            if passes_filter(
+                a,
+                target["include_any"],
+                target["exclude_any"],
+                target.get("title_any"),
+                target.get("body_any"),
+            )
         ]
         if not articles:
             continue
