@@ -137,6 +137,8 @@ def load_targets() -> list:
                     "title_any": [w.lower() for w in item.get("title_any", [])],
                     # 제목엔 없어도 요약에 이름+이 동작단어가 있으면 통과 (경기내용 기사 살리기)
                     "body_any": [w.lower() for w in item.get("body_any", [])],
+                    # 기사 주소에 이 조각이 있으면 제외 (예: /basketball/ = 농구 카테고리)
+                    "link_exclude": [w.lower() for w in item.get("link_exclude", [])],
                 }
             )
         return targets
@@ -144,7 +146,7 @@ def load_targets() -> list:
     # .env 의 단순 키워드
     return [
         {"queries": [k], "label": k, "include_any": [], "exclude_any": [],
-         "title_any": [], "body_any": []}
+         "title_any": [], "body_any": [], "link_exclude": []}
         for k in KEYWORDS
     ]
 
@@ -281,7 +283,8 @@ def fetch_merged(queries: list, label: str) -> list:
 
 
 def passes_filter(article: dict, include_any: list, exclude_any: list,
-                  title_any: list = None, body_any: list = None) -> bool:
+                  title_any: list = None, body_any: list = None,
+                  link_exclude: list = None) -> bool:
     """관련성 필터.
 
     - exclude_any: 하나라도 있으면 버림 (농구·배우 등)
@@ -296,6 +299,12 @@ def passes_filter(article: dict, include_any: list, exclude_any: list,
     title = article["title"].lower()
     desc = article["description"].lower()
     text = title + " " + desc
+
+    # 주소(카테고리) 기반 제외 — 예: /basketball/ 은 무조건 농구
+    if link_exclude:
+        link = (article.get("link", "") + " " + article.get("id", "")).lower()
+        if any(pat in link for pat in link_exclude):
+            return False
 
     if exclude_any and any(word in text for word in exclude_any):
         return False
@@ -467,6 +476,7 @@ def check_once(targets: list, state: dict, first_run_labels: set) -> None:
                 target["exclude_any"],
                 target.get("title_any"),
                 target.get("body_any"),
+                target.get("link_exclude"),
             )
         ]
         if not articles:
