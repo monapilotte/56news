@@ -139,6 +139,11 @@ def load_targets() -> list:
                     "body_any": [w.lower() for w in item.get("body_any", [])],
                     # 기사 주소에 이 조각이 있으면 제외 (예: /basketball/ = 농구 카테고리)
                     "link_exclude": [w.lower() for w in item.get("link_exclude", [])],
+                    # True 면 제목에 이름이 없을 때 요약에 투구동작(body_any)까지
+                    # 있어야 통과하는 옛 엄격 모드. 기본은 이름만 있으면 통과.
+                    "require_action_in_body": bool(
+                        item.get("require_action_in_body", False)
+                    ),
                 }
             )
         return targets
@@ -146,7 +151,8 @@ def load_targets() -> list:
     # .env 의 단순 키워드
     return [
         {"queries": [k], "label": k, "include_any": [], "exclude_any": [],
-         "title_any": [], "body_any": [], "link_exclude": []}
+         "title_any": [], "body_any": [], "link_exclude": [],
+         "require_action_in_body": False}
         for k in KEYWORDS
     ]
 
@@ -284,17 +290,22 @@ def fetch_merged(queries: list, label: str) -> list:
 
 def passes_filter(article: dict, include_any: list, exclude_any: list,
                   title_any: list = None, body_any: list = None,
-                  link_exclude: list = None) -> bool:
+                  link_exclude: list = None,
+                  require_action_in_body: bool = False) -> bool:
     """관련성 필터.
 
     - exclude_any: 하나라도 있으면 버림 (농구·배우 등)
     - include_any: 있으면 그 중 하나는 제목/요약에 있어야 함
     - 관련성(주인공 여부):
         title_any 가 지정되면 →
-          제목에 title_any 단어가 있으면 통과,
-          없으면 body_any 가 지정된 경우에 한해
-          "요약에 title_any 이름 + 투구동작(body_any)"이 같이 있으면 통과.
-        (언급만 된 잡기사는 버리고, 경기내용 기사는 살림)
+          제목에 title_any 단어가 있으면 통과.
+          제목엔 없어도 요약에 title_any 이름이 있으면 통과.
+          (네이버 검색은 쿼리에 이름이 필수 포함되므로 돌아온 기사는
+           사실상 다 주인공 관련이고, 농구·배우 등은 exclude_any 가 거른다.
+           그래서 이름만 있으면 제목에 없는 경기·팀 기사도 살린다.)
+        require_action_in_body=True 이고 body_any 가 지정되면 →
+          제목에 없을 때는 "요약에 이름 + 투구동작(body_any)"이
+          같이 있어야만 통과하는 옛 엄격 모드로 동작한다.
     """
     title = article["title"].lower()
     desc = article["description"].lower()
@@ -314,11 +325,13 @@ def passes_filter(article: dict, include_any: list, exclude_any: list,
     if title_any:
         if any(word in title for word in title_any):
             return True
-        if body_any:
-            name_in_desc = any(word in desc for word in title_any)
+        name_in_desc = any(word in desc for word in title_any)
+        if require_action_in_body and body_any:
+            # 옛 엄격 모드: 요약에 이름 + 투구동작이 같이 있어야 통과
             action_in_desc = any(word in desc for word in body_any)
             return name_in_desc and action_in_desc
-        return False
+        # 기본: 요약에 이름만 있으면 통과 (제목에 없는 경기·팀 기사 살림)
+        return name_in_desc
     return True
 
 
@@ -477,6 +490,7 @@ def check_once(targets: list, state: dict, first_run_labels: set) -> None:
                 target.get("title_any"),
                 target.get("body_any"),
                 target.get("link_exclude"),
+                target.get("require_action_in_body", False),
             )
         ]
         if not articles:
