@@ -144,6 +144,9 @@ def load_targets() -> list:
                     "require_action_in_body": bool(
                         item.get("require_action_in_body", False)
                     ),
+                    # 중간 모드: 제목에 없을 때 요약에 이름이 이 횟수 이상 나오면
+                    # 통과(투구동작 없이도). 1이면 느슨(이름만), 크게 주면 엄격해짐.
+                    "min_name_mentions": int(item.get("min_name_mentions", 1)),
                 }
             )
         return targets
@@ -152,7 +155,7 @@ def load_targets() -> list:
     return [
         {"queries": [k], "label": k, "include_any": [], "exclude_any": [],
          "title_any": [], "body_any": [], "link_exclude": [],
-         "require_action_in_body": False}
+         "require_action_in_body": False, "min_name_mentions": 1}
         for k in KEYWORDS
     ]
 
@@ -291,7 +294,8 @@ def fetch_merged(queries: list, label: str) -> list:
 def passes_filter(article: dict, include_any: list, exclude_any: list,
                   title_any: list = None, body_any: list = None,
                   link_exclude: list = None,
-                  require_action_in_body: bool = False) -> bool:
+                  require_action_in_body: bool = False,
+                  min_name_mentions: int = 1) -> bool:
     """관련성 필터.
 
     - exclude_any: 하나라도 있으면 버림 (농구·배우 등)
@@ -326,12 +330,23 @@ def passes_filter(article: dict, include_any: list, exclude_any: list,
         if any(word in title for word in title_any):
             return True
         name_in_desc = any(word in desc for word in title_any)
-        if require_action_in_body and body_any:
-            # 옛 엄격 모드: 요약에 이름 + 투구동작이 같이 있어야 통과
-            action_in_desc = any(word in desc for word in body_any)
-            return name_in_desc and action_in_desc
-        # 기본: 요약에 이름만 있으면 통과 (제목에 없는 경기·팀 기사 살림)
-        return name_in_desc
+        if not name_in_desc:
+            return False
+        # 엄격 모드: 요약에 이름 + 투구동작(body_any)이 같이 있어야 통과
+        if require_action_in_body:
+            return bool(body_any) and any(word in desc for word in body_any)
+        # 중간 모드(min_name_mentions>=2): 이름이 그만큼 여러 번 나오거나
+        # 투구동작이 있으면 통과. (명단에 한 번 스친 잡기사는 버리고,
+        # 이름이 반복되는 인터뷰·소감·집중 기사는 살린다.)
+        if min_name_mentions and min_name_mentions > 1:
+            name_count = sum(desc.count(word) for word in title_any)
+            if name_count >= min_name_mentions:
+                return True
+            if body_any and any(word in desc for word in body_any):
+                return True
+            return False
+        # 느슨 모드: 요약에 이름만 있으면 통과
+        return True
     return True
 
 
@@ -491,6 +506,7 @@ def check_once(targets: list, state: dict, first_run_labels: set) -> None:
                 target.get("body_any"),
                 target.get("link_exclude"),
                 target.get("require_action_in_body", False),
+                target.get("min_name_mentions", 1),
             )
         ]
         if not articles:
