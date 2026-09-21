@@ -147,6 +147,12 @@ def load_targets() -> list:
                     # 중간 모드: 제목에 없을 때 요약에 이름이 이 횟수 이상 나오면
                     # 통과(투구동작 없이도). 1이면 느슨(이름만), 크게 주면 엄격해짐.
                     "min_name_mentions": int(item.get("min_name_mentions", 1)),
+                    # 종목 맥락 단어(예: 야구 용어). 지정되면 하나는 있어야 통과.
+                    "context_any": [w.lower() for w in item.get("context_any", [])],
+                    # 이 링크 조각(예: /kbaseball/)이면 위 맥락 검사 면제.
+                    "context_skip_link": [
+                        w.lower() for w in item.get("context_skip_link", [])
+                    ],
                 }
             )
         return targets
@@ -155,7 +161,8 @@ def load_targets() -> list:
     return [
         {"queries": [k], "label": k, "include_any": [], "exclude_any": [],
          "title_any": [], "body_any": [], "link_exclude": [],
-         "require_action_in_body": False, "min_name_mentions": 1}
+         "require_action_in_body": False, "min_name_mentions": 1,
+         "context_any": [], "context_skip_link": []}
         for k in KEYWORDS
     ]
 
@@ -295,7 +302,9 @@ def passes_filter(article: dict, include_any: list, exclude_any: list,
                   title_any: list = None, body_any: list = None,
                   link_exclude: list = None,
                   require_action_in_body: bool = False,
-                  min_name_mentions: int = 1) -> bool:
+                  min_name_mentions: int = 1,
+                  context_any: list = None,
+                  context_skip_link: list = None) -> bool:
     """관련성 필터.
 
     - exclude_any: 하나라도 있으면 버림 (농구·배우 등)
@@ -325,6 +334,15 @@ def passes_filter(article: dict, include_any: list, exclude_any: list,
         return False
     if include_any and not any(word in text for word in include_any):
         return False
+
+    # 종목 맥락 게이트: context_any(예: 야구 단어)가 지정되면, 그 중 하나가
+    # 제목/요약에 있어야 통과. 단 링크가 context_skip_link(예: /kbaseball/)면 면제.
+    # (제목에 이름이 있어도 야구 단어가 전혀 없는 타종목 기사를 걸러낸다.)
+    if context_any:
+        link = (article.get("link", "") + " " + article.get("id", "")).lower()
+        skip = context_skip_link and any(pat in link for pat in context_skip_link)
+        if not skip and not any(word in text for word in context_any):
+            return False
 
     if title_any:
         if any(word in title for word in title_any):
@@ -507,6 +525,8 @@ def check_once(targets: list, state: dict, first_run_labels: set) -> None:
                 target.get("link_exclude"),
                 target.get("require_action_in_body", False),
                 target.get("min_name_mentions", 1),
+                target.get("context_any"),
+                target.get("context_skip_link"),
             )
         ]
         if not articles:
