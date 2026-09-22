@@ -156,6 +156,10 @@ def load_targets() -> list:
                     # 제목에 이 태그가 있으면 사진기사로 보고, 이름이 본문에만
                     # 있어도 통과시킨다(관련성 완화). 종목 게이트는 그대로 적용.
                     "photo_markers": [w.lower() for w in item.get("photo_markers", [])],
+                    # 요약이 이 어미로 끝나면 사진 캡션으로 간주 (예: "고 있다")
+                    "photo_desc_endings": [
+                        w.lower() for w in item.get("photo_desc_endings", [])
+                    ],
                 }
             )
         return targets
@@ -165,7 +169,8 @@ def load_targets() -> list:
         {"queries": [k], "label": k, "include_any": [], "exclude_any": [],
          "title_any": [], "body_any": [], "link_exclude": [],
          "require_action_in_body": False, "min_name_mentions": 1,
-         "context_any": [], "context_skip_link": [], "photo_markers": []}
+         "context_any": [], "context_skip_link": [], "photo_markers": [],
+         "photo_desc_endings": []}
         for k in KEYWORDS
     ]
 
@@ -308,7 +313,8 @@ def passes_filter(article: dict, include_any: list, exclude_any: list,
                   min_name_mentions: int = 1,
                   context_any: list = None,
                   context_skip_link: list = None,
-                  photo_markers: list = None) -> bool:
+                  photo_markers: list = None,
+                  photo_desc_endings: list = None) -> bool:
     """관련성 필터.
 
     - exclude_any: 하나라도 있으면 버림 (농구·배우 등)
@@ -354,11 +360,16 @@ def passes_filter(article: dict, include_any: list, exclude_any: list,
         name_in_desc = any(word in desc for word in title_any)
         if not name_in_desc:
             return False
-        # 사진기사(제목에 [포토]/[사진] 등 태그) + 이름이 본문에 있으면 통과.
-        # (여기까지 왔으면 exclude·context 게이트를 이미 통과 = 야구 사진이므로
-        #  조연으로 찍힌 사진 기사도 살린다. 농구 사진은 앞 게이트에서 걸러짐.)
+        # 사진기사 감지 → 이름이 본문에 있으면 통과 (조연으로 찍힌 사진도 살림).
+        # 여기까지 왔으면 exclude·context 게이트를 이미 통과 = 야구 사진이므로 안전.
+        # (1) 제목에 [포토]/[사진] 등 태그가 있거나
+        # (2) 요약이 "~고 있다"처럼 장면 묘사(현재진행)로 끝나면 사진 캡션으로 본다.
         if photo_markers and any(m in title for m in photo_markers):
             return True
+        if photo_desc_endings:
+            body = re.sub(r"\s*\d{4}\.\s?\d{1,2}\.\s?\d{1,2}.*$", "", desc).rstrip(". ")
+            if any(body.endswith(e) for e in photo_desc_endings):
+                return True
         # 엄격 모드: 요약에 이름 + 투구동작(body_any)이 같이 있어야 통과
         if require_action_in_body:
             return bool(body_any) and any(word in desc for word in body_any)
@@ -537,6 +548,7 @@ def check_once(targets: list, state: dict, first_run_labels: set) -> None:
                 target.get("context_any"),
                 target.get("context_skip_link"),
                 target.get("photo_markers"),
+                target.get("photo_desc_endings"),
             )
         ]
         if not articles:
