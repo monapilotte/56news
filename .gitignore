@@ -1,0 +1,20 @@
+# ⚠️ 이 폴더엔 개인 파일이 많아서, 기본적으로 "전부 무시"하고
+#    봇 관련 파일만 화이트리스트로 추적한다. (개인 파일 실수 업로드 방지)
+
+# 1) 루트의 모든 것 무시
+/*
+
+# 2) 봇 파일만 추적 허용
+!/news_bot.py
+!/pitch_log.py
+!/keywords.json
+!/requirements.txt
+!/README.md
+!/.env.example
+!/.gitignore
+!/seen.json
+!/pitch_seen.json
+!/.github/
+
+# 3) 비밀키는 화이트리스트에서도 절대 제외 (한 번 더 방어)
+.env

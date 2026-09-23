@@ -2,11 +2,11 @@ name: news-bot
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
-  workflow_dispatch:
+    - cron: "*/5 * * * *"    # 5분마다 (깃허브 사정상 조금 지연될 수 있음)
+  workflow_dispatch:          # 수동 실행 버튼
 
 permissions:
-  contents: write
+  contents: write             # 상태 파일을 저장소에 다시 커밋하기 위함
 
 concurrency:
   group: news-bot
@@ -16,14 +16,18 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
+      # ref: main 으로 항상 최신 상태를 받아옴 (Re-run 시에도 중복 방지)
       - uses: actions/checkout@v4
         with:
           ref: main
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
       - name: Install deps
         run: pip install -r requirements.txt
+
       - name: Run news bot
         env:
           NEWS_SOURCE: naver
@@ -32,22 +36,28 @@ jobs:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           RUN_ONCE: "1"
         run: python news_bot.py
+
       - name: Run pitch log
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DISCORD_WEBHOOK_URL_PITCH: ${{ secrets.DISCORD_WEBHOOK_URL_PITCH }}
         run: python pitch_log.py
+
       - name: Persist state
         run: |
           if [ -z "$(git status --porcelain seen.json pitch_seen.json)" ]; then
-            echo "변경 없음"; exit 0
+            echo "변경 없음 — 커밋 생략"
+            exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add seen.json pitch_seen.json
           git commit -m "update state [skip ci]"
+          # push 충돌 시 최신 것을 받아 rebase 후 재시도 (최대 3회)
           for i in 1 2 3; do
             git pull --rebase --autostash origin main && git push && exit 0
-            echo "재시도 $i..."; sleep 3
+            echo "push 재시도 $i..."
+            sleep 3
           done
+          echo "push 실패"
           exit 1
