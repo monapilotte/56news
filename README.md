@@ -68,6 +68,7 @@ python news_bot.py --once # 1회 실행 후 종료
 | `photo_markers` | 제목에 있으면 사진기사로 인정하는 태그(`[포토]` 등) |
 | `photo_desc_endings` | 요약이 이 어미로 끝나면 사진 캡션으로 인정 (예: `"고 있다"`) |
 | `body_any` | 관련성 통과용 동작 단어 |
+| `body_regex` | 요약이 이 정규식에 맞으면 통과 (예: 이름과 특정 단어가 같은 문장) |
 | `min_name_mentions` | 요약에 이름이 이 횟수 이상이면 통과(중간 모드) |
 | `require_action_in_body` | `true` 면 엄격 모드(이름+동작 필수) |
 
@@ -81,6 +82,7 @@ python news_bot.py --once # 1회 실행 후 종료
 4. `context_any` — 주제 맥락 단어 필요 (단 `context_skip_link` 주소는 면제)
 5. 관련성 판정 — 다음 중 하나면 통과:
    - 제목에 이름이 있음
+   - 요약이 `body_regex` 에 맞음
    - 사진기사로 감지됨(`photo_markers` 태그 또는 요약이 `photo_desc_endings` 로 끝남)
    - 엄격 모드: 이름 + `body_any` 동작어
    - 중간 모드: 이름이 `min_name_mentions` 회 이상, 또는 `body_any` 동작어
@@ -92,6 +94,8 @@ python news_bot.py --once # 1회 실행 후 종료
 2. **Settings → Secrets and variables → Actions** 에 등록:
    `NCP_API_KEY_ID`, `NCP_API_KEY`, `DISCORD_WEBHOOK_URL`
 3. 워크플로가 매 실행마다 `news_bot.py --once` 를 돌리고 `seen.json` 을 커밋한다
+   (push 는 최대 5회 재시도. 인증/권한 오류만 실패 처리하고, GitHub 서버 일시 오류는
+   경고만 남긴 채 성공 처리 — 상태는 다음 실행에서 다시 저장된다)
 4. 정시 실행이 필요하면 외부 크론에서 아래를 주기적으로 POST:
    - `POST https://api.github.com/repos/<owner>/<repo>/actions/workflows/news.yml/dispatches`
    - 헤더: `Authorization: Bearer <PAT>`, `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28`

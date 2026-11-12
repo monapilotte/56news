@@ -160,6 +160,8 @@ def load_targets() -> list:
                     "photo_desc_endings": [
                         w.lower() for w in item.get("photo_desc_endings", [])
                     ],
+                    # 요약이 이 정규식에 맞으면 통과 (예: 이름과 "조장"이 같은 문장)
+                    "body_regex": [w.lower() for w in item.get("body_regex", [])],
                 }
             )
         return targets
@@ -170,7 +172,7 @@ def load_targets() -> list:
          "title_any": [], "body_any": [], "link_exclude": [],
          "require_action_in_body": False, "min_name_mentions": 1,
          "context_any": [], "context_skip_link": [], "photo_markers": [],
-         "photo_desc_endings": []}
+         "photo_desc_endings": [], "body_regex": []}
         for k in KEYWORDS
     ]
 
@@ -296,11 +298,16 @@ def fetch_news(query: str, label: str) -> list:
 
 
 def fetch_merged(queries: list, label: str) -> list:
-    """여러 검색어 결과를 합치고 링크 기준으로 중복 제거"""
+    """여러 검색어 결과를 합치고 링크 기준으로 중복 제거.
+
+    네이버 요약은 검색어마다 달라지므로, 기사별로 요약을 모두 snippets 에 모은다.
+    """
     merged = {}
     for q in queries:
         for a in fetch_news(q, label):
-            merged.setdefault(a["id"], a)  # 먼저 나온 것 유지
+            snippets = merged.setdefault(a["id"], a).setdefault("snippets", [])
+            if a["description"] not in snippets:
+                snippets.append(a["description"])
         if len(queries) > 1:
             time.sleep(0.3)  # 서버 배려용 짧은 간격
     return list(merged.values())
@@ -314,7 +321,8 @@ def passes_filter(article: dict, include_any: list, exclude_any: list,
                   context_any: list = None,
                   context_skip_link: list = None,
                   photo_markers: list = None,
-                  photo_desc_endings: list = None) -> bool:
+                  photo_desc_endings: list = None,
+                  body_regex: list = None) -> bool:
     """관련성 필터.
 
     - exclude_any: 하나라도 있으면 버림 (농구·배우 등)
@@ -357,6 +365,9 @@ def passes_filter(article: dict, include_any: list, exclude_any: list,
     if title_any:
         if any(word in title for word in title_any):
             return True
+        # 이름 표기가 달라도("준용이") 잡도록 이름 검사보다 먼저 본다.
+        if body_regex and any(re.search(pat, desc) for pat in body_regex):
+            return True
         name_in_desc = any(word in desc for word in title_any)
         if not name_in_desc:
             return False
@@ -386,6 +397,36 @@ def passes_filter(article: dict, include_any: list, exclude_any: list,
         # 느슨 모드: 요약에 이름만 있으면 통과
         return True
     return True
+
+
+def article_passes(article: dict, target: dict) -> bool:
+    """검색어별 요약을 각각 판정해 하나라도 통과하면 통과.
+
+    요약을 이어 붙이면 이름 횟수가 부풀므로 따로 본다. 단 제외어는 어느 요약에
+    있든 탈락시킨다.
+    """
+    snippets = article.get("snippets") or [article["description"]]
+    all_text = " ".join(snippets).lower()
+    if any(word in all_text for word in target["exclude_any"]):
+        return False
+    return any(
+        passes_filter(
+            {**article, "description": snippet},
+            target["include_any"],
+            target["exclude_any"],
+            target.get("title_any"),
+            target.get("body_any"),
+            target.get("link_exclude"),
+            target.get("require_action_in_body", False),
+            target.get("min_name_mentions", 1),
+            target.get("context_any"),
+            target.get("context_skip_link"),
+            target.get("photo_markers"),
+            target.get("photo_desc_endings"),
+            target.get("body_regex"),
+        )
+        for snippet in snippets
+    )
 
 
 def fetch_news_naver(query: str, label: str) -> list:
@@ -533,24 +574,7 @@ def check_once(targets: list, state: dict, first_run_labels: set) -> None:
             continue
 
         # include/exclude 필터로 원하는 기사만 남김
-        articles = [
-            a
-            for a in fetched
-            if passes_filter(
-                a,
-                target["include_any"],
-                target["exclude_any"],
-                target.get("title_any"),
-                target.get("body_any"),
-                target.get("link_exclude"),
-                target.get("require_action_in_body", False),
-                target.get("min_name_mentions", 1),
-                target.get("context_any"),
-                target.get("context_skip_link"),
-                target.get("photo_markers"),
-                target.get("photo_desc_endings"),
-            )
-        ]
+        articles = [a for a in fetched if article_passes(a, target)]
         if not articles:
             continue
 

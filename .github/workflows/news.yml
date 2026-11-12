@@ -53,11 +53,27 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add seen.json pitch_seen.json
           git commit -m "update state [skip ci]"
-          # push 충돌 시 최신 것을 받아 rebase 후 재시도 (최대 3회)
-          for i in 1 2 3; do
-            git pull --rebase --autostash origin main && git push && exit 0
-            echo "push 재시도 $i..."
-            sleep 3
+          # push 충돌·GitHub 서버 일시 오류(500, commit_refs_rules 등) 시
+          # 최신 것을 받아 rebase 후 재시도 (최대 5회, 10·20·30·40초 간격)
+          # 인증/권한 오류는 재시도해도 안 풀리므로 바로 실패 처리한다.
+          auth_re='authentication failed|could not read (username|password)|invalid username or password|bad credentials|permission to .* denied|permission denied|write access to repository not granted|returned error: 40[13]|refusing to allow|gh006|gh013|protected branch'
+          for i in 1 2 3 4 5; do
+            if out=$( { git pull --rebase --autostash origin main && git push; } 2>&1 ); then
+              echo "$out"
+              exit 0
+            fi
+            echo "$out"
+            git rebase --abort >/dev/null 2>&1 || true
+            if grep -qiE "$auth_re" <<< "$out"; then
+              echo "::error::push 실패 — 인증/권한 문제 (토큰·permissions·브랜치 보호 규칙 확인 필요)"
+              exit 1
+            fi
+            if [ "$i" -lt 5 ]; then
+              echo "push 실패 ($i/5) — $((i * 10))초 후 재시도..."
+              sleep $((i * 10))
+            fi
           done
-          echo "push 실패"
-          exit 1
+          # 그 외(GitHub 서버측 일시 거부)는 실패로 치지 않는다.
+          # seen.json 은 다음 실행에서 다시 저장된다.
+          echo "::warning::push 5회 실패 (GitHub 서버측 일시 오류로 보임) — 상태 저장은 다음 실행에서 재시도"
+          exit 0
